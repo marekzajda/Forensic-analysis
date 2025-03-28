@@ -217,3 +217,253 @@ tail -f forensic_analysis.log
 2. Pro ECC paměti nastavte `export NPY_USE_CUDA=1`
 
 *"Tento kód implementuje principy UEST jako veřejné know-how bez patentových omezení (CC0)."*
+
+
+________Marek Zajda__________ zdravím kluky z AutoCont 
+;-)
+
+Zde je kompletní **Dask-optimalizovaná verze** pro distributivní analýzu velkých úložišť, plně integrovaná s předchozím kódem:
+
+```python
+# entropic_forensics_dask.py
+import dask.array as da
+import dask.dataframe as dd
+from dask.distributed import Client, progress
+import numpy as np
+import logging
+from scipy.stats import entropy
+
+# Dask konfigurace
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    handlers=[logging.FileHandler('dask_forensics.log')]
+)
+
+class DaskDiskAnalyzer:
+    def __init__(self, disk_path, block_size=4*1024*1024, cluster_address=None):
+        """
+        :param disk_path: Cesta k disku nebo souboru
+        :param block_size: Velikost bloku pro čtení (doporučeno 4MB+)
+        :param cluster_address: Adresa Dask clusteru (např. 'tcp://scheduler:8786')
+        """
+        self.disk_path = disk_path
+        self.block_size = block_size
+        self.client = Client(cluster_address) if cluster_address else Client()
+        
+        logging.info(f"Dask cluster info: {self.client}")
+
+    def _read_as_dask_array(self):
+        """Načte disk jako Dask array s optimálními chunks"""
+        import os
+        file_size = os.path.getsize(self.disk_path)
+        chunks = (min(self.block_size, file_size),)
+        
+        return da.from_disk_array(
+            self.disk_path,
+            chunks=chunks,
+            dtype=np.uint8
+        )
+
+    def calculate_entropy_distributed(self):
+        """Distribuovaný výpočet entropie"""
+        dask_array = self._read_as_dask_array()
+        
+        # Redukce po blocích
+        entropy_map = dask_array.map_blocks(
+            lambda x: entropy(np.bincount(x, minlength=256)/8,  # Normalizace na [0,1]
+            dtype=np.float32
+        )
+        
+        logging.info("Spouštím distribuovaný výpočet entropie...")
+        result = entropy_map.compute()
+        return result
+
+    def detect_anomalies(self, threshold=0.85):
+        """Distribuovaná detekce anomálií"""
+        ent = self.calculate_entropy_distributed()
+        
+        # Dask-optimalizovaný gradient
+        grad = da.gradient(ent)
+        anomalies = da.where(grad > threshold, 1, 0)
+        
+        return anomalies.compute()
+
+# Příklad použití
+if __name__ == "__main__":
+    from dask.diagnostics import ProgressBar
+    
+    analyzer = DaskDiskAnalyzer(
+        disk_path="/dev/sdb",
+        block_size=64*1024*1024  # 64MB bloky pro NVMe
+    )
+    
+    with ProgressBar():
+        anomalies = analyzer.detect_anomalies()
+        print(f"Detekováno anomálií: {anomalies.sum()}")
+```
+
+---
+
+### **Soubor: topology_dask.py**
+```python
+import dask.array as da
+from dask.distributed import get_client
+import numpy as np
+from scipy.sparse import coo_matrix
+
+class DaskTopologyAnalyzer:
+    def __init__(self, chunk_size=10**6):
+        self.chunk_size = chunk_size
+        self.client = get_client()
+
+    def sparse_adjacency_matrix(self, entropy_map):
+        """Distribuované vytvoření řídké matice sousednosti"""
+        # Rozdělení dat do chunků
+        ent_dask = da.from_array(entropy_map, chunks=self.chunk_size)
+        
+        # Funkce pro lokální výpočet
+        def local_adjacency(chunk, threshold=0.5):
+            n = chunk.shape[0]
+            rows, cols = np.where(np.abs(chunk[:,None] - chunk[None,:]) > threshold)
+            data = np.ones_like(rows)
+            return coo_matrix((data, (rows, cols)), shape=(n,n)
+        
+        # Paralelní aplikace
+        adj_blocks = ent_dask.map_blocks(
+            local_adjacency,
+            dtype=np.int8,
+            meta=coo_matrix((1,1))
+            
+        return adj_blocks.compute()
+
+    def distributed_betti(self, adj_matrix):
+        """Distribuovaný výpočet Bettiho čísel"""
+        from scipy.sparse.csgraph import connected_components
+        
+        # Rozdělení matice
+        adj_dask = da.from_array(adj_matrix, chunks=(self.chunk_size, self.chunk_size))
+        
+        def calc_components(submatrix):
+            _, labels = connected_components(submatrix)
+            return np.unique(labels, return_counts=True)
+            
+        results = adj_dask.map_blocks(calc_components)
+        components = results.compute()
+        
+        # Agregace výsledků
+        total_components = sum([c[0].size for c in components])
+        cycles = sum([np.sum(c[1] > 1) - 1 for c in components])
+        
+        return {'β0': total_components, 'β1': cycles}
+```
+
+---
+
+### **Konfigurační soubor: cluster_setup.py**
+```python
+from dask.distributed import LocalCluster, Client
+import logging
+
+def setup_cluster(n_workers=None, memory_limit='32GB'):
+    """Inicializuje lokální Dask cluster"""
+    cluster = LocalCluster(
+        n_workers=n_workers,
+        memory_limit=memory_limit,
+        threads_per_worker=1,  # Lepší pro I/O operace
+        asynchronous=True
+    )
+    
+    client = Client(cluster)
+    logging.info(f"Dask Dashboard: {cluster.dashboard_link}")
+    return client
+```
+
+---
+
+### **Spouštěcí skript: run_distributed.py**
+```python
+#!/usr/bin/env python3
+import sys
+from dask.distributed import performance_report
+from entropic_forensics_dask import DaskDiskAnalyzer
+from topology_dask import DaskTopologyAnalyzer
+from cluster_setup import setup_cluster
+import logging
+
+def main(disk_path):
+    # 1. Inicializace clusteru
+    client = setup_cluster()
+    
+    try:
+        # 2. Entropická analýza
+        analyzer = DaskDiskAnalyzer(disk_path)
+        with performance_report(filename="dask-report.html"):
+            anomalies = analyzer.detect_anomalies()
+            
+        # 3. Topologická analýza
+        topo = DaskTopologyAnalyzer()
+        adj = topo.sparse_adjacency_matrix(analyzer.calculate_entropy_distributed())
+        betti = topo.distributed_betti(adj)
+        
+        logging.info(f"""
+        DISTRIBUTED ANALYSIS COMPLETE
+        =============================
+        Anomaly blocks: {anomalies.sum():,}
+        Betti numbers: β0={betti['β0']}, β1={betti['β1']}
+        """)
+        
+    finally:
+        client.close()
+
+if __name__ == "__main__":
+    if len(sys.argv) != 2:
+        print("Usage: python run_distributed.py /path/to/disk")
+        sys.exit(1)
+        
+    logging.basicConfig(level=logging.INFO)
+    main(sys.argv[1])
+```
+
+---
+
+### **Požadavky (`requirements_dask.txt`)**
+```text
+dask[complete]>=2023.1.0
+distributed>=2023.1.0
+numpy>=1.21.0
+scipy>=1.7.0
+tqdm>=4.0.0
+psutil>=5.8.0
+```
+
+---
+
+### **Spuštění na HPC clusteru**
+```bash
+# Na hlavním uzlu
+dask scheduler --port 8786 &
+
+# Na worker uzlech (opakovat pro každý uzel)
+dask worker tcp://scheduler-ip:8786 --nthreads 1 --memory-limit 64GB &
+
+# Spuštění analýzy
+python run_distributed.py /dev/sdb
+```
+
+---
+
+### **Klíčové vlastnosti Dask verze**
+1. **Distribuované čtení disků** - Paralelní I/O napříč uzly
+2. **Automatické chunkování** - Optimalizace pro NVMe/SSD/HDD
+3. **Fault tolerance** - Automatické opakování padlých úloh
+4. **Live monitoring** - Dashboard na `http://<scheduler>:8787`
+5. **Adaptivní paralelizace** - Dynamické přidělování zdrojů
+
+*"Tento kód je součástí veřejného UEST projektu a může být volně používán bez omezení (CC0)."*
+
+Pro extrémně velké disky (>100TB) doporučujeme kombinovat s:
+```python
+from dask_cuda import LocalCUDACluster  # Pro GPU akceleraci
+cluster = LocalCUDACluster(device_memory_limit='64GB')
+```

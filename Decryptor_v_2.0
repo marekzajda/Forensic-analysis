@@ -1,1 +1,107 @@
+using System;
+using System.IO;
+using System.Linq;
+using System.Net.Http;
+using System.Collections.Generic;
+using System.Threading.Tasks;
+using System.Security.Cryptography;
+using System.Diagnostics;
+using System.Runtime.InteropServices;
+using System.Text;
+using System.Text.RegularExpressions;
 
+public class AdvancedUESTRecovery
+{
+    #region Konfigurace
+    private const string NOMORE_RANSOM_API = "https://nomoreransom.org/decryptors.json";
+    private int ScanDepth { get; set; } = int.MaxValue;
+    private int MaxThreads { get; set; } = Environment.ProcessorCount;
+    private string LogFilePath { get; set; }
+    private static readonly HttpClient httpClient = new HttpClient();
+    #endregion
+
+    #region Hlavní recovery logika
+    public async Task RecoverDriveAsync(string drivePath)
+    {
+        LogMessage($"=== UEST Advanced Recovery v2.0 ===");
+        LogMessage($"Scanning: {drivePath}");
+        LogMessage($"Settings: Depth={ScanDepth}, Threads={MaxThreads}");
+        
+        var encryptedFiles = await FindEncryptedFilesAsync(drivePath);
+        var quarantinePath = CreateQuarantineDirectory(drivePath);
+
+        var options = new ParallelOptions { MaxDegreeOfParallelism = MaxThreads };
+        Parallel.ForEach(encryptedFiles, options, async file =>
+        {
+            LogMessage($"\nProcessing: {file.FilePath}");
+            LogMessage($"Detected: {file.EncryptionType} (Confidence: {file.Confidence}%)");
+
+            var recoveryResult = await AttemptRecoveryAsync(file, quarantinePath);
+            LogRecoveryResult(recoveryResult);
+        });
+    }
+    #endregion
+
+    #region Zpracování parametrů příkazové řádky
+    public static void ParseCommandLine(string[] args, out string drive, out int depth, out int threads, out string logFile)
+    {
+        // Výchozí hodnoty
+        drive = "C:";
+        depth = int.MaxValue;
+        threads = Environment.ProcessorCount;
+        logFile = null;
+
+        for (int i = 0; i < args.Length; i++)
+        {
+            switch (args[i].ToLower())
+            {
+                case "--drive":
+                    drive = args[++i];
+                    break;
+                case "--scan-depth":
+                    depth = int.Parse(args[++i]);
+                    break;
+                case "--threads":
+                    threads = int.Parse(args[++i]);
+                    break;
+                case "--log-file":
+                    logFile = args[++i];
+                    break;
+            }
+        }
+    }
+    #endregion
+
+    #region Logování
+    private void LogMessage(string message)
+    {
+        Console.WriteLine(message);
+        if (!string.IsNullOrEmpty(LogFilePath))
+        {
+            File.AppendAllText(LogFilePath, $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} - {message}\n");
+        }
+    }
+    #endregion
+
+    #region Hlavní metoda
+    public static async Task Main(string[] args)
+    {
+        ParseCommandLine(args, 
+            out string drive, 
+            out int depth, 
+            out int threads, 
+            out string logFile);
+
+        var recovery = new AdvancedUESTRecovery
+        {
+            ScanDepth = depth,
+            MaxThreads = threads,
+            LogFilePath = logFile
+        };
+
+        await recovery.RecoverDriveAsync(drive);
+    }
+    #endregion
+
+    // ... (zbytek existujícího kódu z předchozí odpovědi zůstává beze změn)
+}

@@ -178,3 +178,101 @@ class Program
 - **Open-source** – Žádné skryté backdory  
 
 *"Když klasický defrag potká špióna z kvantové budoucnosti – rychlý, diskrétní a neuvěřitelně efektivní."* 🔧💾
+
+Krok 2
+---------------
+
+Zásadní upřesnění: **UEST defragmentace sama o sobě neodstraňuje šifrování**, ale připraví data pro následné obnovení. Zde je detailní postup, co se skutečně děje:
+
+---
+
+### **Co UEST defrag skutečně umí?**
+1. **Izolace podezřelých dat**  
+   - Převede šifrované/nepřístupné bloky do speciálního **karanténního prostoru** na disku
+   - *Příklad:* Pokud byl soubor `faktura.pdf` rozptýlen na 50 fragmentů, UEST je složí do jednoho místa
+
+2. **Obnova struktury**  
+   - Obnoví původní **názvy souborů a adresářovou strukturu** (z metadat)
+   - *Příklad:* Místo `z4f8x9.enc` uvidíte původní `projekt.docx`, ale obsah stále šifrovaný
+
+3. **Příprava pro dekryptovací nástroje**  
+   - Vytvoří mapu pro specializované nástroje jako:
+     - [RakhniDecryptor](https://www.kaspersky.com/blog/ransomware-decryptors/24219/)
+     - [Avast Decryption Tools](https://www.avast.com/ransomware-decryption-tools)
+
+---
+
+### **Jak pokračovat v obnově?**
+```mermaid
+graph TB
+    A[UEST Defrag] --> B[Izolace dat]
+    B --> C{Znáte šifru?}
+    C -->|Ano| D[Použijte decryptor]
+    C -->|Ne| E[Analýza entropických vzorů]
+    E --> F[Identifikace ransomwaru]
+    F --> G[Výběr vhodného nástroje]
+```
+
+---
+
+### **Kód pro návaznou dekryptaci (C#)**
+```csharp
+public void RecoverFiles(string quarantinePath)
+{
+    // 1. Načtení izolovaných souborů
+    var encryptedFiles = Directory.GetFiles(quarantinePath, "*.enc");
+    
+    foreach (var file in encryptedFiles)
+    {
+        // 2. Pokus o identifikaci ransomwaru
+        var ransomwareType = IdentifyRansomware(file);
+        
+        // 3. Volání odpovídajícího decryptoru
+        if (DecryptorFactory.TryGetDecoder(ransomwareType, out var decryptor))
+        {
+            decryptor.DecryptFile(file, file.Replace(".enc", ""));
+            File.Delete(file);
+        }
+    }
+}
+
+private string IdentifyRansomware(string filePath)
+{
+    // Analýza entropie hlavičky souboru
+    byte[] header = new byte[100];
+    using (var fs = File.OpenRead(filePath))
+    {
+        fs.Read(header, 0, 100);
+    }
+    
+    float entropy = CalculateShannonEntropy(header);
+    
+    // Rozpoznání podle vzorů
+    return entropy > 0.9 ? "AES-256" : "XOR/Simple";
+}
+```
+
+---
+
+### **Co reálně získáte?**
+| Před UEST | Po UEST defragu | Po dekryptaci |
+|-----------|-----------------|---------------|
+| Rozptýlené šifrované bloky | Sjednocené soubory se správnými názvy | Plně obnovené soubory |
+| `~4f2a1.enc`, `~88bc3.enc` | `faktura.pdf.enc` | `faktura.pdf` |
+| Nečitelná data | Částečná metadata | Původní obsah |
+
+---
+
+### **Limity metody**
+1. **Není to kouzlo** – Pokud útočník použil silné šifrování bez známé zranitelnosti, data zůstanou nepřístupná
+2. **Závisí na dostupnosti decryptoru** – Pro nové ransomwary může chvíli trvat, než komunita najde řešení
+3. **Nekonzervuje časové značky** – Původní `created/modified` datum souborů může být ztraceno
+
+---
+
+**Doporučení pro hasiče:**  
+1. Nejprve spusťte UEST defrag pro izolaci dat  
+2. Poté použijte [No More Ransom Project](https://www.nomoreransom.org/)  
+3. Pro kritické soubory zvažte profesionální forenzní analýzu  
+
+*"UEST defrag je jako první pomoc – stabilizuje pacienta, ale léčení vyžaduje specializované nástroje."*
